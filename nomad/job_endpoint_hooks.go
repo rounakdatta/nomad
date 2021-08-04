@@ -126,7 +126,7 @@ func (jobImpliedConstraints) Name() string {
 
 func (jobImpliedConstraints) Mutate(j *structs.Job) (*structs.Job, []error, error) {
 	// Get the required Vault Policies
-	policies := j.VaultPolicies()
+	vaultBlocks := j.Vault()
 
 	// Get the required signals
 	signals := j.RequiredSignals()
@@ -135,13 +135,13 @@ func (jobImpliedConstraints) Mutate(j *structs.Job) (*structs.Job, []error, erro
 	nativeServiceDisco := j.RequiredNativeServiceDiscovery()
 
 	// Hot path
-	if len(signals) == 0 && len(policies) == 0 && len(nativeServiceDisco) == 0 {
+	if len(signals) == 0 && len(vaultBlocks) == 0 && len(nativeServiceDisco) == 0 {
 		return j, nil, nil
 	}
 
 	// Add Vault constraints if no Vault constraint exists
 	for _, tg := range j.TaskGroups {
-		_, ok := policies[tg.Name]
+		_, ok := vaultBlocks[tg.Name]
 		if !ok {
 			// Not requesting Vault
 			continue

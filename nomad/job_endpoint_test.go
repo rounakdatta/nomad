@@ -1744,6 +1744,10 @@ func TestJobEndpoint_Register_Vault_MultiNamespaces(t *testing.T) {
 	}
 }
 
+func TestJobEndpoint_Register_Vault_EntityAlias(t *testing.T) {
+	ci.Parallel(t)
+}
+
 // TestJobEndpoint_Register_SemverConstraint asserts that semver ordering is
 // used when evaluating semver constraints.
 func TestJobEndpoint_Register_SemverConstraint(t *testing.T) {

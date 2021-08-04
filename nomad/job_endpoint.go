@@ -14,7 +14,6 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 
 	"github.com/golang/snappy"
-	"github.com/hashicorp/consul/lib"
 	"github.com/pkg/errors"
 
 	"github.com/hashicorp/nomad/acl"
@@ -221,46 +220,8 @@ func (j *Job) Register(args *structs.JobRegisterRequest, reply *structs.JobRegis
 	}
 
 	// Ensure that the job has permissions for the requested Vault tokens
-	policies := args.Job.VaultPolicies()
-	if len(policies) != 0 {
-		vconf := j.srv.config.VaultConfig
-		if !vconf.IsEnabled() {
-			return fmt.Errorf("Vault not enabled and Vault policies requested")
-		}
-
-		// Have to check if the user has permissions
-		if !vconf.AllowsUnauthenticated() {
-			if args.Job.VaultToken == "" {
-				return fmt.Errorf("Vault policies requested but missing Vault Token")
-			}
-
-			vault := j.srv.vault
-			s, err := vault.LookupToken(context.Background(), args.Job.VaultToken)
-			if err != nil {
-				return err
-			}
-
-			allowedPolicies, err := PoliciesFrom(s)
-			if err != nil {
-				return err
-			}
-
-			// Check Namespaces
-			namespaceErr := j.multiVaultNamespaceValidation(policies, s)
-			if namespaceErr != nil {
-				return namespaceErr
-			}
-
-			// If we are given a root token it can access all policies
-			if !lib.StrContains(allowedPolicies, "root") {
-				flatPolicies := structs.VaultPoliciesSet(policies)
-				subset, offending := helper.SliceStringIsSubset(allowedPolicies, flatPolicies)
-				if !subset {
-					return fmt.Errorf("Passed Vault Token doesn't allow access to the following policies: %s",
-						strings.Join(offending, ", "))
-				}
-			}
-		}
+	if err := j.validateVault(args.Job); err != nil {
+		return err
 	}
 
 	// helper function that checks if the Consul token supplied with the job has
@@ -467,6 +428,116 @@ func (j *Job) Register(args *structs.JobRegisterRequest, reply *structs.JobRegis
 		err = j.multiregionDrop(args, reply)
 		if err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func (j *Job) validateVault(job *structs.Job) error {
+	vaultBlocks := job.Vault()
+	if len(vaultBlocks) == 0 {
+		return nil
+	}
+
+	vconf := j.srv.config.VaultConfig
+	if !vconf.IsEnabled() {
+		return fmt.Errorf("Vault not enabled but used in the job")
+	}
+
+	// Return early if Vault configuration doesn't require authentication.
+	if vconf.AllowsUnauthenticated() {
+		return nil
+	}
+
+	// At this point the job has a vault block and the server requires
+	// authentication, so check if the user has the right permissions.
+	if job.VaultToken == "" {
+		return fmt.Errorf("Vault used in the job but missing Vault token")
+	}
+
+	vault := j.srv.vault
+	tokenSecret, err := vault.LookupToken(context.Background(), job.VaultToken)
+	if err != nil {
+		return fmt.Errorf("failed to lookup Vault token: %v", err)
+	}
+
+	// Check namespaces.
+	err = j.multiVaultNamespaceValidation(vaultBlocks, tokenSecret)
+	if err != nil {
+		return err
+	}
+
+	// Check policies.
+	// If we are given a root token it can access all policies
+	allowedPolicies, err := tokenSecret.TokenPolicies()
+	if err != nil {
+		return fmt.Errorf("failed to lookup Vault token policies: %v", err)
+	}
+
+	jobPolicies := structs.VaultPoliciesSet(vaultBlocks)
+	isRoot := helper.SliceStringContains(allowedPolicies, "root")
+
+	if len(jobPolicies) > 0 && !isRoot {
+		subset, offending := helper.SliceStringIsSubset(allowedPolicies, jobPolicies)
+		if !subset {
+			return fmt.Errorf("Vault token doesn't allow access to the following policies: %s",
+				strings.Join(offending, ", "))
+		}
+	}
+
+	// Check entity aliases.
+	// In order to use entity aliases in a job, the following conditions must
+	// be met:
+	//   - the token used to submit the job and the Nomad server configuration
+	//     must have a role
+	//   - both roles must allow access to all entity aliases defined in the job
+	aliases := structs.VaultEntityAliasesSet(vaultBlocks)
+
+	if len(aliases) > 0 {
+		var tokenData structs.VaultTokenData
+		if err := structs.DecodeVaultSecretData(tokenSecret, &tokenData); err != nil {
+			return fmt.Errorf("failed to parse Vault token data: %v", err)
+		}
+
+		validateRole := func(role string) error {
+			s, err := vault.LookupTokenRole(context.Background(), role)
+			if err != nil {
+				return err
+			}
+
+			var data structs.VaultTokenRoleData
+			if err := structs.DecodeVaultSecretData(s, &data); err != nil {
+				return fmt.Errorf("failed to parse role data: %v", err)
+			}
+
+			invalidAliases := []string{}
+			for _, a := range aliases {
+				if !data.AllowsEntityAlias(a) {
+					invalidAliases = append(invalidAliases, a)
+				}
+			}
+			if len(invalidAliases) > 0 {
+				return fmt.Errorf("role doesn't allow access to the following entity aliases: %s",
+					strings.Join(invalidAliases, ", "))
+			}
+			return nil
+		}
+
+		// Check if user token allows requested entity aliases.
+		if tokenData.Role == "" {
+			return fmt.Errorf("jobs with Vault entity aliases require the Vault token to have a role")
+		}
+		if err := validateRole(tokenData.Role); err != nil {
+			return fmt.Errorf("failed to validate entity alias against Vault token: %v", err)
+		}
+
+		// Check if Nomad server role allows requested entity aliases.
+		if vconf.Role == "" {
+			return fmt.Errorf("jobs with Vault entity aliases require the Nomad server to have a Vault role")
+		}
+		if err := validateRole(vconf.Role); err != nil {
+			return fmt.Errorf("failed to validate entity alias against Nomad server configuration: %v", err)
 		}
 	}
 

@@ -21,6 +21,14 @@ type TestVaultClient struct {
 	// by the LookupToken call
 	LookupTokenSecret map[string]*vapi.Secret
 
+	// LookupTokenRoleErrors maps a token role name to an error that will be
+	// returned by the LookupTokenRole call
+	LookupTokenRoleErrors map[string]error
+
+	// LookupTokenRoleSecret maps a token role name to the Vault secret that
+	// will be returned by the LookupTokenRole call
+	LookupTokenRoleSecret map[string]*vapi.Secret
+
 	// CreateTokenErrors maps a token to an error that will be returned by the
 	// CreateToken call
 	CreateTokenErrors map[string]map[string]error
@@ -41,6 +49,20 @@ func (v *TestVaultClient) LookupToken(ctx context.Context, token string) (*vapi.
 	}
 	if v.LookupTokenErrors != nil {
 		err = v.LookupTokenErrors[token]
+	}
+
+	return secret, err
+}
+
+func (v *TestVaultClient) LookupTokenRole(ctx context.Context, role string) (*vapi.Secret, error) {
+	var secret *vapi.Secret
+	var err error
+
+	if v.LookupTokenRoleSecret != nil {
+		secret = v.LookupTokenRoleSecret[role]
+	}
+	if v.LookupTokenRoleErrors != nil {
+		err = v.LookupTokenRoleErrors[role]
 	}
 
 	return secret, err
@@ -71,7 +93,8 @@ func (v *TestVaultClient) SetLookupTokenSecret(token string, secret *vapi.Secret
 func (v *TestVaultClient) SetLookupTokenAllowedPolicies(token string, policies []string) {
 	s := &vapi.Secret{
 		Data: map[string]interface{}{
-			"policies": policies,
+			"policies":  policies,
+			"entity_id": "TEST",
 		},
 	}
 

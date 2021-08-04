@@ -4581,8 +4581,8 @@ func (j *Job) IsPlugin() bool {
 	return false
 }
 
-// VaultPolicies returns the set of Vault policies per task group, per task
-func (j *Job) VaultPolicies() map[string]map[string]*Vault {
+// Vault returns the set of Vault blocks per task group, per task
+func (j *Job) Vault() map[string]map[string]*Vault {
 	policies := make(map[string]map[string]*Vault, len(j.TaskGroups))
 
 	for _, tg := range j.TaskGroups {
@@ -8933,6 +8933,10 @@ type Vault struct {
 	// ChangeSignal is the signal sent to the task when a new token is
 	// retrieved. This is only valid when using the signal change mode.
 	ChangeSignal string
+
+	// EntityAlias is passed to Vault when creating a token to associate that
+	// token with an entity.
+	EntityAlias string
 }
 
 func DefaultVaultBlock() *Vault {
