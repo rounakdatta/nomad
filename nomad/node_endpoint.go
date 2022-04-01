@@ -17,6 +17,7 @@ import (
 	vapi "github.com/hashicorp/vault/api"
 
 	"github.com/hashicorp/nomad/acl"
+	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/helper/uuid"
 	"github.com/hashicorp/nomad/nomad/state"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -1101,8 +1102,9 @@ func (n *Node) GetClientAllocs(args *structs.NodeSpecificRequest,
 
 // UpdateAlloc is used to update the client status of an allocation
 func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.GenericResponse) error {
+	var err error
 	// Ensure the connection was initiated by another client if TLS is used.
-	err := validateTLSCertificateLevel(n.srv, n.ctx, tlsCertificateLevelClient)
+	err = validateTLSCertificateLevel(n.srv, n.ctx, tlsCertificateLevelClient)
 	if err != nil {
 		return err
 	}
@@ -1128,6 +1130,7 @@ func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.Gene
 	var evals []*structs.Evaluation
 
 	for _, allocToUpdate := range args.Alloc {
+		evalTriggerBy := ""
 		allocToUpdate.ModifyTime = now.UTC().UnixNano()
 
 		alloc, _ := n.srv.State().AllocByID(nil, allocToUpdate.ID)
@@ -1140,34 +1143,55 @@ func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.Gene
 		}
 
 		// if the job has been purged, this will always return error
-		job, err := n.srv.State().JobByID(nil, alloc.Namespace, alloc.JobID)
+		var job *structs.Job
+		job, err = n.srv.State().JobByID(nil, alloc.Namespace, alloc.JobID)
 		if err != nil {
 			n.logger.Debug("UpdateAlloc unable to find job", "job", alloc.JobID, "error", err)
-			continue
 		}
+
+		// If the job is nil it means it has been de-registered.
 		if job == nil {
-			n.logger.Debug("UpdateAlloc unable to find job", "job", alloc.JobID)
-			continue
+			evalTriggerBy = structs.EvalTriggerJobDeregister
+			if err == nil {
+				n.logger.Debug("UpdateAlloc unable to find job", "job", alloc.JobID)
+			}
 		}
 
-		taskGroup := job.LookupTaskGroup(alloc.TaskGroup)
-		if taskGroup == nil {
-			continue
+		var taskGroup *structs.TaskGroup
+		if job != nil {
+			taskGroup = job.LookupTaskGroup(alloc.TaskGroup)
 		}
 
-		evalTriggerBy := ""
 		var eval *structs.Evaluation
 		// Add an evaluation if this is a failed alloc that is eligible for rescheduling
 		if allocToUpdate.ClientStatus == structs.AllocClientStatusFailed &&
 			alloc.FollowupEvalID == "" &&
+			taskGroup != nil &&
 			alloc.RescheduleEligible(taskGroup.ReschedulePolicy, now) {
 
 			evalTriggerBy = structs.EvalTriggerRetryFailedAlloc
 		}
 
-		//Add an evaluation if this is a reconnecting allocation.
+		// Add an evaluation if this is a reconnecting allocation, and sync the
+		// DesiredTransition in case the job was purged or force rescheduled.
 		if alloc.ClientStatus == structs.AllocClientStatusUnknown {
 			evalTriggerBy = structs.EvalTriggerReconnect
+		}
+
+		// If we got to this point without setting the trigger by, it means
+		// we found the job, but we weren't able to find the taskGroup for the
+		// alloc on the job, and the alloc isn't unknown by the server. We'll
+		// treat this as a job deregister because it means the client still
+		// has an orphaned alloc somehow.
+		if evalTriggerBy == "" {
+			evalTriggerBy = structs.EvalTriggerJobDeregister
+		}
+
+		// If we are cleaning up an orphaned alloc, update it
+		// so that the eval will send a shutdown to the client.
+		if evalTriggerBy == structs.EvalTriggerJobDeregister {
+			allocToUpdate.DesiredStatus = structs.AllocDesiredStatusStop
+			allocToUpdate.DesiredTransition.NoShutdownDelay = helper.BoolToPtr(true)
 		}
 
 		if evalTriggerBy != "" {

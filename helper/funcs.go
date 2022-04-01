@@ -121,6 +121,14 @@ func CompareTimePtrs(a, b *time.Duration) bool {
 	return *a == *b
 }
 
+// CompareBoolPtrs return true if a is the same as b.
+func CompareBoolPtrs(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // Float64ToPtr returns the pointer to an float64
 func Float64ToPtr(f float64) *float64 {
 	return &f

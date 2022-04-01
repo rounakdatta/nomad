@@ -9262,6 +9262,14 @@ type DesiredTransition struct {
 	NoShutdownDelay *bool
 }
 
+// Equals compares two desired transitions to see if they are configured the same.
+func (d *DesiredTransition) Equals(o *DesiredTransition) bool {
+	return helper.CompareBoolPtrs(d.Migrate, o.Migrate) &&
+		helper.CompareBoolPtrs(d.Reschedule, o.Reschedule) &&
+		helper.CompareBoolPtrs(d.ForceReschedule, o.ForceReschedule) &&
+		helper.CompareBoolPtrs(d.NoShutdownDelay, o.NoShutdownDelay)
+}
+
 // Merge merges the two desired transitions, preferring the values from the
 // passed in object.
 func (d *DesiredTransition) Merge(o *DesiredTransition) {

@@ -3714,3 +3714,96 @@ func TestClientEndpoint_ShouldCreateNodeEval(t *testing.T) {
 		})
 	}
 }
+
+func TestClientEndpoint_UpdateAlloc_Unknown(t *testing.T) {
+	t.Parallel()
+
+	s1, cleanupS1 := TestServer(t, func(c *Config) {
+		// Disabling scheduling in this test so that we can
+		// ensure that the state store doesn't accumulate more evals
+		// than what we expect the unit test to add
+		c.NumSchedulers = 0
+	})
+
+	defer cleanupS1()
+	codec := rpcClient(t, s1)
+	testutil.WaitForLeader(t, s1.RPC)
+
+	// Create the register request
+	node := mock.Node()
+	reg := &structs.NodeRegisterRequest{
+		Node:         node,
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	// Fetch the response
+	var resp structs.GenericResponse
+	if err := msgpackrpc.CallWithCodec(codec, "Node.Register", reg, &resp); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	fsmState := s1.fsm.State()
+	// Inject mock job
+	job := mock.Job()
+	job.ID = "unknown-test-job"
+	err := fsmState.UpsertJob(structs.MsgTypeTestSetup, 101, job)
+	require.NoError(t, err)
+
+	// Inject unknown allocation
+	alloc := mock.Alloc()
+	alloc.JobID = job.ID
+	alloc.NodeID = node.ID
+	alloc.ClientStatus = structs.AllocClientStatusUnknown
+	alloc.DesiredTransition = structs.DesiredTransition{ForceReschedule: helper.BoolToPtr(true)}
+	alloc.TaskGroup = job.TaskGroups[0].Name
+
+	err = fsmState.UpsertJobSummary(99, mock.JobSummary(alloc.JobID))
+	require.NoError(t, err)
+
+	err = fsmState.UpsertAllocs(structs.MsgTypeTestSetup, 100, []*structs.Allocation{alloc})
+	require.NoError(t, err)
+
+	// Create an alloc with a different client status and desired transition
+	// so that we can test that UpdateAlloc handles unknown allocs correctly.
+	clientAlloc := alloc.Copy()
+	clientAlloc.ClientStatus = structs.AllocClientStatusComplete
+	clientAlloc.DesiredTransition = structs.DesiredTransition{}
+
+	// Update the alloc
+	update := &structs.AllocUpdateRequest{
+		Alloc:        []*structs.Allocation{clientAlloc},
+		WriteRequest: structs.WriteRequest{Region: "global"},
+	}
+
+	var resp2 structs.NodeAllocsResponse
+	start := time.Now()
+	err = msgpackrpc.CallWithCodec(codec, "Node.UpdateAlloc", update, &resp2)
+	require.NoError(t, err)
+	require.NotEqual(t, uint64(0), resp2.Index)
+
+	if diff := time.Since(start); diff < batchUpdateInterval {
+		t.Fatalf("too fast: %v", diff)
+	}
+
+	// Lookup the alloc
+	updatedAlloc, err := fsmState.AllocByID(nil, alloc.ID)
+	require.NoError(t, err)
+	require.Equal(t, structs.AllocClientStatusComplete, updatedAlloc.ClientStatus)
+	// UpdateAlloc should merge the server side DesiredTransition with the
+	// incoming update.
+	require.True(t, updatedAlloc.DesiredTransition.Equals(&alloc.DesiredTransition))
+	require.True(t, updatedAlloc.ModifyTime > 0)
+
+	// Assert that exactly one eval with TriggeredBy EvalTriggerRetryFailedAlloc exists
+	evaluations, err := fsmState.EvalsByJob(nil, job.Namespace, job.ID)
+	require.NoError(t, err)
+	require.True(t, len(evaluations) != 0)
+	foundCount := 0
+	for _, resultEval := range evaluations {
+		if resultEval.TriggeredBy == structs.EvalTriggerReconnect && resultEval.WaitUntil.IsZero() {
+			foundCount++
+		}
+	}
+	require.Equal(t, 1, foundCount, "Should create exactly one eval for unknown allocs")
+
+}
