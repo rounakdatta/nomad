@@ -225,8 +225,20 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node, support
 	ignore = make(map[string]*structs.Allocation)
 
 	for _, alloc := range a {
-		// Terminal allocs are always untainted as they should never be migrated.
-		if alloc.TerminalStatus() {
+		reconnected := false
+		expired := false
+
+		// Don't compute reconnected for complete allocs so that they will end up
+		// in the untainted set.
+		if supportsDisconnectedClients &&
+			alloc.ClientStatus != structs.AllocClientStatusComplete &&
+			alloc.ClientStatus != structs.AllocClientStatusLost {
+			reconnected, expired = alloc.Reconnected()
+		}
+
+		// Terminal allocs, if not reconnected, are always untainted as they
+		// should never be migrated.
+		if alloc.TerminalStatus() && !reconnected {
 			untainted[alloc.ID] = alloc
 			continue
 		}
@@ -244,7 +256,9 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node, support
 		}
 
 		// Ignore unknown allocs
-		if supportsDisconnectedClients && alloc.ClientStatus == structs.AllocClientStatusUnknown {
+		if supportsDisconnectedClients &&
+			alloc.ClientStatus == structs.AllocClientStatusUnknown &&
+			alloc.DesiredStatus == structs.AllocDesiredStatusRun {
 			ignore[alloc.ID] = alloc
 			continue
 		}
@@ -252,7 +266,6 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node, support
 		taintedNode, ok := taintedNodes[alloc.NodeID]
 		if !ok {
 			// Filter allocs on a node that is now re-connected to be resumed.
-			reconnected, expired := alloc.Reconnected()
 			if reconnected {
 				if expired {
 					lost[alloc.ID] = alloc
@@ -283,7 +296,6 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node, support
 				}
 			case structs.NodeStatusReady:
 				// Filter reconnecting allocs with replacements on a node that is now connected.
-				reconnected, expired := alloc.Reconnected()
 				if reconnected {
 					if expired {
 						lost[alloc.ID] = alloc
@@ -326,7 +338,8 @@ func (a allocSet) filterByRescheduleable(isBatch, isDisconnecting bool, now time
 		// Ignore failing allocs that have already been rescheduled.
 		// Only failed or disconnecting allocs should be rescheduled.
 		// Protects against a bug allowing rescheduling running allocs.
-		if alloc.NextAllocation != "" && alloc.TerminalStatus() {
+		if alloc.NextAllocation != "" &&
+			alloc.TerminalStatus() {
 			continue
 		}
 
@@ -459,6 +472,19 @@ func (a allocSet) filterByDeployment(id string) (match, nonmatch allocSet) {
 		}
 	}
 	return
+}
+
+// filterByFailedReconnect filters allocation into a set that have failed on the
+// client but do not have a terminal status at the server so that they can be
+// marked as stop at the server.
+func (a allocSet) filterByFailedReconnect() allocSet {
+	failed := make(allocSet)
+	for _, alloc := range a {
+		if !alloc.ServerTerminalStatus() && alloc.ClientStatus == structs.AllocClientStatusFailed {
+			failed[alloc.ID] = alloc
+		}
+	}
+	return failed
 }
 
 // delayByStopAfterClientDisconnect returns a delay for any lost allocation that's got a

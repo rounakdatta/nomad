@@ -287,6 +287,10 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 					TaskGroup:          "web",
 					PreviousAllocation: "failed-original",
 				},
+			},
+			migrate:       allocSet{},
+			disconnecting: allocSet{},
+			reconnecting: allocSet{
 				"failed-original": {
 					ID:           "failed-original",
 					Name:         "web",
@@ -298,11 +302,8 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 					TaskStates:   reconnectTaskState,
 				},
 			},
-			migrate:       allocSet{},
-			disconnecting: allocSet{},
-			reconnecting:  allocSet{},
-			ignore:        allocSet{},
-			lost:          allocSet{},
+			ignore: allocSet{},
+			lost:   allocSet{},
 		},
 		{
 			name:                        "disco-client-reconnecting-running-no-replacement",
@@ -361,10 +362,10 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 					AllocStates:  unknownAllocState,
 					TaskStates:   reconnectTaskState,
 				},
-				// Failed allocs on reconnected nodes that are complete are untainted
-				"untainted-reconnect-failed": {
-					ID:           "untainted-reconnect-failed",
-					Name:         "untainted-reconnect-failed",
+				// Failed allocs on reconnected nodes are in reconnecting so that they can be stopped.
+				"reconnecting-failed": {
+					ID:           "reconnecting-failed",
+					Name:         "reconnecting-failed",
 					ClientStatus: structs.AllocClientStatusFailed,
 					Job:          testJob,
 					NodeID:       "normal",
@@ -403,7 +404,7 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 					NodeID:             "normal",
 					TaskGroup:          "web",
 					AllocStates:        unknownAllocState,
-					PreviousAllocation: "untainted-reconnect-failed",
+					PreviousAllocation: "reconnecting-failed",
 				},
 				// Lost replacement allocs on reconnected nodes don't get restarted
 				"untainted-reconnect-lost-replacement": {
@@ -422,16 +423,6 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 					ID:           "untainted-reconnect-complete",
 					Name:         "untainted-reconnect-complete",
 					ClientStatus: structs.AllocClientStatusComplete,
-					Job:          testJob,
-					NodeID:       "normal",
-					TaskGroup:    "web",
-					AllocStates:  unknownAllocState,
-					TaskStates:   reconnectTaskState,
-				},
-				"untainted-reconnect-failed": {
-					ID:           "untainted-reconnect-failed",
-					Name:         "untainted-reconnect-failed",
-					ClientStatus: structs.AllocClientStatusFailed,
 					Job:          testJob,
 					NodeID:       "normal",
 					TaskGroup:    "web",
@@ -466,7 +457,7 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 					NodeID:             "normal",
 					TaskGroup:          "web",
 					AllocStates:        unknownAllocState,
-					PreviousAllocation: "untainted-reconnect-failed",
+					PreviousAllocation: "reconnecting-failed",
 				},
 				"untainted-reconnect-lost-replacement": {
 					ID:                 "untainted-reconnect-lost-replacement",
@@ -481,9 +472,20 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 			},
 			migrate:       allocSet{},
 			disconnecting: allocSet{},
-			reconnecting:  allocSet{},
-			ignore:        allocSet{},
-			lost:          allocSet{},
+			reconnecting: allocSet{
+				"reconnecting-failed": {
+					ID:           "reconnecting-failed",
+					Name:         "reconnecting-failed",
+					ClientStatus: structs.AllocClientStatusFailed,
+					Job:          testJob,
+					NodeID:       "normal",
+					TaskGroup:    "web",
+					AllocStates:  unknownAllocState,
+					TaskStates:   reconnectTaskState,
+				},
+			},
+			ignore: allocSet{},
+			lost:   allocSet{},
 		},
 		{
 			name:                        "disco-client-disconnect",
@@ -503,13 +505,14 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 				},
 				// Unknown allocs on disconnected nodes are ignored
 				"ignore-unknown": {
-					ID:           "ignore-unknown",
-					Name:         "ignore-unknown",
-					ClientStatus: structs.AllocClientStatusUnknown,
-					Job:          testJob,
-					NodeID:       "disconnected",
-					TaskGroup:    "web",
-					AllocStates:  unknownAllocState,
+					ID:            "ignore-unknown",
+					Name:          "ignore-unknown",
+					ClientStatus:  structs.AllocClientStatusUnknown,
+					DesiredStatus: structs.AllocDesiredStatusRun,
+					Job:           testJob,
+					NodeID:        "disconnected",
+					TaskGroup:     "web",
+					AllocStates:   unknownAllocState,
 				},
 				// Unknown allocs on disconnected nodes are lost when expired
 				"lost-unknown": {
@@ -538,13 +541,14 @@ func TestAllocSet_filterByTainted(t *testing.T) {
 			ignore: allocSet{
 				// Unknown allocs on disconnected nodes are ignored
 				"ignore-unknown": {
-					ID:           "ignore-unknown",
-					Name:         "ignore-unknown",
-					ClientStatus: structs.AllocClientStatusUnknown,
-					Job:          testJob,
-					NodeID:       "disconnected",
-					TaskGroup:    "web",
-					AllocStates:  unknownAllocState,
+					ID:            "ignore-unknown",
+					Name:          "ignore-unknown",
+					ClientStatus:  structs.AllocClientStatusUnknown,
+					DesiredStatus: structs.AllocDesiredStatusRun,
+					Job:           testJob,
+					NodeID:        "disconnected",
+					TaskGroup:     "web",
+					AllocStates:   unknownAllocState,
 				},
 			},
 			lost: allocSet{

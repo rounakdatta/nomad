@@ -5131,6 +5131,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 		jobVersionIncrement          uint64
 		nodeScoreIncrement           float64
 		disconnectedAllocStatus      string
+		serverDesiredStatus          string
 		isBatch                      bool
 		nodeStatusDisconnected       bool
 		replace                      bool
@@ -5147,6 +5148,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      false,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusRunning,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: false,
 			expected: &resultExpectation{
 				reconnectUpdates: 2,
@@ -5163,6 +5165,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       1,
 			disconnectedAllocStatus:      structs.AllocClientStatusRunning,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: false,
 			expected: &resultExpectation{
 				stop:             1,
@@ -5181,6 +5184,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       1,
 			disconnectedAllocStatus:      structs.AllocClientStatusRunning,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			nodeScoreIncrement:           1,
 			expected: &resultExpectation{
@@ -5194,15 +5198,18 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			},
 		},
 		{
-			name:                         "ignore-original-failed-if-replaced",
+			name:                         "stop-original-failed-on-reconnect",
 			allocCount:                   4,
 			replace:                      true,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusFailed,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			expected: &resultExpectation{
+				stop: 2,
 				desiredTGUpdates: map[string]*structs.DesiredUpdates{
 					"web": {
+						Stop:   2,
 						Ignore: 4,
 					},
 				},
@@ -5214,6 +5221,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      false,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusFailed,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			expected: &resultExpectation{
 				stop:  2,
@@ -5233,6 +5241,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                 false,
 			disconnectedAllocCount:  2,
 			disconnectedAllocStatus: structs.AllocClientStatusComplete,
+			serverDesiredStatus:     structs.AllocDesiredStatusRun,
 			isBatch:                 true,
 			expected: &resultExpectation{
 				desiredTGUpdates: map[string]*structs.DesiredUpdates{
@@ -5248,6 +5257,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusRunning,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			jobVersionIncrement:          1,
 			expected: &resultExpectation{
@@ -5266,6 +5276,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusRunning,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			jobVersionIncrement:          1,
 			expected: &resultExpectation{
@@ -5284,6 +5295,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusRunning,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			failReplacement:              true,
 			shouldStopOnDisconnectedNode: true,
 			jobVersionIncrement:          1,
@@ -5303,6 +5315,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       1,
 			disconnectedAllocStatus:      structs.AllocClientStatusPending,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			nodeStatusDisconnected:       true,
 			expected: &resultExpectation{
@@ -5321,6 +5334,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                      true,
 			disconnectedAllocCount:       2,
 			disconnectedAllocStatus:      structs.AllocClientStatusUnknown,
+			serverDesiredStatus:          structs.AllocDesiredStatusRun,
 			shouldStopOnDisconnectedNode: true,
 			nodeStatusDisconnected:       true,
 			maxDisconnect:                helper.TimeToPtr(2 * time.Second),
@@ -5340,6 +5354,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			replace:                 false,
 			disconnectedAllocCount:  2,
 			disconnectedAllocStatus: structs.AllocClientStatusRunning,
+			serverDesiredStatus:     structs.AllocDesiredStatusRun,
 			nodeStatusDisconnected:  true,
 			expected: &resultExpectation{
 				place:             2,
@@ -5373,6 +5388,8 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			// Set alloc state
 			disconnectedAllocCount := tc.disconnectedAllocCount
 			for _, alloc := range allocs {
+				alloc.DesiredStatus = tc.serverDesiredStatus
+
 				if tc.maxDisconnect != nil {
 					alloc.Job.TaskGroups[0].MaxClientDisconnect = tc.maxDisconnect
 				}
@@ -5449,6 +5466,7 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 			}
 
 			results := reconciler.Compute()
+			assertResults(t, results, tc.expected)
 
 			for _, stopResult := range results.stop {
 				if tc.shouldStopOnDisconnectedNode {
@@ -5459,8 +5477,6 @@ func TestReconciler_Disconnected_Client(t *testing.T) {
 
 				require.Equal(t, job.Version, stopResult.alloc.Job.Version)
 			}
-
-			assertResults(t, results, tc.expected)
 		})
 	}
 }

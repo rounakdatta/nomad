@@ -1194,20 +1194,29 @@ func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.Gene
 			allocToUpdate.DesiredTransition.NoShutdownDelay = helper.BoolToPtr(true)
 		}
 
-		if evalTriggerBy != "" {
-			eval = &structs.Evaluation{
-				ID:          uuid.Generate(),
-				Namespace:   alloc.Namespace,
-				TriggeredBy: evalTriggerBy,
-				JobID:       alloc.JobID,
-				Type:        job.Type,
-				Priority:    job.Priority,
-				Status:      structs.EvalStatusPending,
-				CreateTime:  now.UTC().UnixNano(),
-				ModifyTime:  now.UTC().UnixNano(),
-			}
-			evals = append(evals, eval)
+		var jobType string
+		var jobPriority int
+
+		if job == nil {
+			jobType = alloc.Job.Type
+			jobPriority = alloc.Job.Priority
+		} else {
+			jobType = job.Type
+			jobPriority = job.Priority
 		}
+
+		eval = &structs.Evaluation{
+			ID:          uuid.Generate(),
+			Namespace:   alloc.Namespace,
+			TriggeredBy: evalTriggerBy,
+			JobID:       alloc.JobID,
+			Type:        jobType,
+			Priority:    jobPriority,
+			Status:      structs.EvalStatusPending,
+			CreateTime:  now.UTC().UnixNano(),
+			ModifyTime:  now.UTC().UnixNano(),
+		}
+		evals = append(evals, eval)
 	}
 
 	// Add this to the batch

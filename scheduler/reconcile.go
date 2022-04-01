@@ -697,7 +697,7 @@ func (a *allocReconciler) computePlacements(group *structs.TaskGroup,
 	}
 
 	// Add replacements for disconnected and lost allocs up to group.Count
-	existing := len(untainted) + len(migrate) + len(reschedule) + len(reconnecting)
+	existing := len(untainted) + len(migrate) + len(reschedule) + len(reconnecting) - len(reconnecting.filterByFailedReconnect())
 
 	// Add replacements for lost
 	for _, alloc := range lost {
@@ -927,7 +927,11 @@ func (a *allocReconciler) computeStop(group *structs.TaskGroup, nameIndex *alloc
 	// Hot path the nothing to do case
 	remove := len(untainted) + len(migrate) + len(reconnecting) - group.Count
 	if remove <= 0 {
-		return stop
+		// Even if there appears to be nothing to do here, we have to make sure
+		// failed reconnects get marked for stop.
+		failReconnects := reconnecting.filterByFailedReconnect()
+		a.markStop(failReconnects, structs.AllocClientStatusFailed, allocRescheduled)
+		return stop.union(failReconnects)
 	}
 
 	// Filter out any terminal allocations from the untainted set
@@ -1044,6 +1048,25 @@ func (a *allocReconciler) computeStopByReconnecting(untainted, reconnecting, sto
 			a.result.stop = append(a.result.stop, allocStopResult{
 				alloc:             reconnectingAlloc,
 				statusDescription: allocNotNeeded,
+			})
+			delete(reconnecting, reconnectingAlloc.ID)
+
+			remove--
+			// if we've removed all we need to, stop iterating and return.
+			if remove == 0 {
+				return remove
+			}
+			continue
+		}
+
+		// If the desired status is run, but the reconnecting alloc failed, add to stop set.
+		if reconnectingAlloc.DesiredStatus == structs.AllocDesiredStatusRun &&
+			reconnectingAlloc.ClientStatus == structs.AllocClientStatusFailed {
+
+			stop[reconnectingAlloc.ID] = reconnectingAlloc
+			a.result.stop = append(a.result.stop, allocStopResult{
+				alloc:             reconnectingAlloc,
+				statusDescription: allocRescheduled,
 			})
 			delete(reconnecting, reconnectingAlloc.ID)
 
@@ -1173,6 +1196,11 @@ func (a *allocReconciler) computeReconnecting(reconnecting allocSet) {
 
 		// If the scheduler has defined a terminal DesiredStatus don't resume the alloc.
 		if alloc.DesiredStatus != structs.AllocDesiredStatusRun {
+			continue
+		}
+
+		// If the alloc has failed don't reconnect.
+		if alloc.ClientStatus != structs.AllocClientStatusRunning {
 			continue
 		}
 
