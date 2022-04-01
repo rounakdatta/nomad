@@ -93,8 +93,7 @@ func (v *TestVaultClient) SetLookupTokenSecret(token string, secret *vapi.Secret
 func (v *TestVaultClient) SetLookupTokenAllowedPolicies(token string, policies []string) {
 	s := &vapi.Secret{
 		Data: map[string]interface{}{
-			"policies":  policies,
-			"entity_id": "TEST",
+			"policies": policies,
 		},
 	}
 
