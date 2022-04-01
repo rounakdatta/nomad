@@ -119,6 +119,7 @@ type VaultClient interface {
 	// LookupToken takes a token string and returns its capabilities.
 	LookupToken(ctx context.Context, token string) (*vapi.Secret, error)
 
+	// LookupTokenRole takes a role name string and returns its data.
 	LookupTokenRole(ctx context.Context, role string) (*vapi.Secret, error)
 
 	// RevokeTokens takes a set of tokens accessor and revokes the tokens
@@ -958,15 +959,15 @@ func (v *vaultClient) CreateToken(ctx context.Context, a *structs.Allocation, ta
 	// Retrieve the Vault block for the task
 	vaultBlocks := a.Job.Vault()
 	if vaultBlocks == nil {
-		return nil, fmt.Errorf("Job doesn't require Vault policies")
+		return nil, fmt.Errorf("Job does not require Vault token")
 	}
 	tg, ok := vaultBlocks[a.TaskGroup]
 	if !ok {
-		return nil, fmt.Errorf("Task group does not require Vault policies")
+		return nil, fmt.Errorf("Task group does not require Vault token")
 	}
 	taskVault, ok := tg[task]
 	if !ok {
-		return nil, fmt.Errorf("Task does not require Vault policies")
+		return nil, fmt.Errorf("Task does not require Vault token")
 	}
 
 	// Set namespace for task
@@ -991,10 +992,11 @@ func (v *vaultClient) CreateToken(ctx context.Context, a *structs.Allocation, ta
 	}
 
 	// If the task defines an entity alias, the Nomad server must have a role
+	// to be able to derive a token.
 	role := v.getRole()
 	if taskVault.EntityAlias != "" {
 		if role == "" {
-			return nil, fmt.Errorf("task defines a Vault entity alias, but the Nomad server doesn't have a Vault role")
+			return nil, fmt.Errorf("task defines a Vault entity alias, but the Nomad server does not have a Vault role")
 		}
 		req.EntityAlias = taskVault.EntityAlias
 	}
@@ -1082,6 +1084,8 @@ func (v *vaultClient) LookupToken(ctx context.Context, token string) (*vapi.Secr
 	return v.auth.Lookup(token)
 }
 
+// LookupTokenRole takes a Vault token role and does a lookup against Vault.
+// The call is rate limited and may be canceled with passed context.
 func (v *vaultClient) LookupTokenRole(ctx context.Context, role string) (*vapi.Secret, error) {
 	if !v.Enabled() {
 		return nil, fmt.Errorf("Vault integration disabled")

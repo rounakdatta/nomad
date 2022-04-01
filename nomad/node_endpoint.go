@@ -1568,15 +1568,15 @@ func (n *Node) DeriveVaultToken(args *structs.DeriveVaultTokenRequest, reply *st
 		return nil
 	}
 
-	// Check the policies
+	// Check if alloc has Vault
 	vaultBlocks := alloc.Job.Vault()
 	if vaultBlocks == nil {
-		setError(fmt.Errorf("Job doesn't require Vault policies"), false)
+		setError(fmt.Errorf("Job does not require Vault token"), false)
 		return nil
 	}
 	tg, ok := vaultBlocks[alloc.TaskGroup]
 	if !ok {
-		setError(fmt.Errorf("Task group does not require Vault policies"), false)
+		setError(fmt.Errorf("Task group does not require Vault token"), false)
 		return nil
 	}
 

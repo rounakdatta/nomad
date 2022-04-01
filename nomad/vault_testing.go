@@ -101,6 +101,8 @@ func (v *TestVaultClient) SetLookupTokenAllowedPolicies(token string, policies [
 	v.SetLookupTokenSecret(token, s)
 }
 
+// SetLookupTokenRoleError sets the error that will be returned by the role
+// lookup.
 func (v *TestVaultClient) SetLookupTokenRoleError(token string, err error) {
 	if v.LookupTokenRoleErrors == nil {
 		v.LookupTokenRoleErrors = make(map[string]error)
@@ -109,6 +111,8 @@ func (v *TestVaultClient) SetLookupTokenRoleError(token string, err error) {
 	v.LookupTokenRoleErrors[token] = err
 }
 
+// SetLookupTokenRoleSecret sets the secret that will be returned by the role
+// lookup.
 func (v *TestVaultClient) SetLookupTokenRoleSecret(role string, secret *vapi.Secret) {
 	if v.LookupTokenRoleSecret == nil {
 		v.LookupTokenRoleSecret = make(map[string]*vapi.Secret)

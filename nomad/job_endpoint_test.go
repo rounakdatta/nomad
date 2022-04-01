@@ -1748,6 +1748,7 @@ func TestJobEndpoint_Register_Vault_MultiNamespaces(t *testing.T) {
 func TestJobEndpoint_Register_Vault_EntityAlias(t *testing.T) {
 	ci.Parallel(t)
 
+	// Create test jobs.
 	jobNoVault := mock.Job()
 	jobNoVault.TaskGroups[0].Tasks[0].Vault = nil
 
@@ -1768,6 +1769,51 @@ func TestJobEndpoint_Register_Vault_EntityAlias(t *testing.T) {
 		jobWithTwoAliases.TaskGroups[0].Tasks[0].Copy())
 	jobWithTwoAliases.TaskGroups[0].Tasks[1].Name = "web2"
 	jobWithTwoAliases.TaskGroups[0].Tasks[1].Vault.EntityAlias = "nomad2"
+
+	// Create test Vault server.
+	tvc := &TestVaultClient{}
+
+	// Load Vault roles
+	tvc.SetLookupTokenRoleSecret("nomad", &vapi.Secret{
+		Data: map[string]interface{}{
+			"allowed_entity_aliases": []string{"nomad"},
+		},
+	})
+	tvc.SetLookupTokenRoleSecret("not-nomad", &vapi.Secret{
+		Data: map[string]interface{}{
+			"allowed_entity_aliases": []string{"not-nomad"},
+		},
+	})
+	tvc.SetLookupTokenRoleSecret("no-alias", &vapi.Secret{
+		Data: map[string]interface{}{
+			"allowed_entity_aliases": []string{},
+		},
+	})
+
+	// Load Vault tokens
+	tvc.SetLookupTokenSecret("root", &vapi.Secret{
+		Data: map[string]interface{}{
+			"policies": []string{"root"},
+		},
+	})
+	tvc.SetLookupTokenSecret("allowed", &vapi.Secret{
+		Data: map[string]interface{}{
+			"policies": []string{"nomad"},
+			"role":     "nomad",
+		},
+	})
+	tvc.SetLookupTokenSecret("not-allowed", &vapi.Secret{
+		Data: map[string]interface{}{
+			"policies": []string{"nomad"},
+			"role":     "not-nomad",
+		},
+	})
+	tvc.SetLookupTokenSecret("no-role", &vapi.Secret{
+		Data: map[string]interface{}{
+			"policies": []string{"nomad"},
+			"role":     "",
+		},
+	})
 
 	testCases := []struct {
 		name          string
@@ -1875,50 +1921,7 @@ func TestJobEndpoint_Register_Vault_EntityAlias(t *testing.T) {
 			s.config.VaultConfig.AllowUnauthenticated = helper.BoolToPtr(false)
 
 			// Replace the Vault Client on the server
-			tvc := &TestVaultClient{}
 			s.vault = tvc
-
-			// Load Vault server roles
-			tvc.SetLookupTokenRoleSecret("nomad", &vapi.Secret{
-				Data: map[string]interface{}{
-					"allowed_entity_aliases": []string{"nomad"},
-				},
-			})
-			tvc.SetLookupTokenRoleSecret("not-nomad", &vapi.Secret{
-				Data: map[string]interface{}{
-					"allowed_entity_aliases": []string{"not-nomad"},
-				},
-			})
-			tvc.SetLookupTokenRoleSecret("no-alias", &vapi.Secret{
-				Data: map[string]interface{}{
-					"allowed_entity_aliases": []string{},
-				},
-			})
-
-			// Load Vault server tokens
-			tvc.SetLookupTokenSecret("root", &vapi.Secret{
-				Data: map[string]interface{}{
-					"policies": []string{"root"},
-				},
-			})
-			tvc.SetLookupTokenSecret("allowed", &vapi.Secret{
-				Data: map[string]interface{}{
-					"policies": []string{"nomad"},
-					"role":     "nomad",
-				},
-			})
-			tvc.SetLookupTokenSecret("not-allowed", &vapi.Secret{
-				Data: map[string]interface{}{
-					"policies": []string{"nomad"},
-					"role":     "not-nomad",
-				},
-			})
-			tvc.SetLookupTokenSecret("no-role", &vapi.Secret{
-				Data: map[string]interface{}{
-					"policies": []string{"nomad"},
-					"role":     "",
-				},
-			})
 
 			job := tc.job.Copy()
 			job.VaultToken = tc.token

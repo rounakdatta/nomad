@@ -350,8 +350,10 @@ func VaultPoliciesSet(policies map[string]map[string]*Vault) []string {
 
 	for _, tgp := range policies {
 		for _, tp := range tgp {
-			for _, p := range tp.Policies {
-				set[p] = struct{}{}
+			if tp != nil {
+				for _, p := range tp.Policies {
+					set[p] = struct{}{}
+				}
 			}
 		}
 	}
@@ -366,7 +368,7 @@ func VaultNamespaceSet(policies map[string]map[string]*Vault) []string {
 
 	for _, tgp := range policies {
 		for _, tp := range tgp {
-			if tp.Namespace != "" {
+			if tp != nil && tp.Namespace != "" {
 				set[tp.Namespace] = struct{}{}
 			}
 		}
@@ -375,13 +377,15 @@ func VaultNamespaceSet(policies map[string]map[string]*Vault) []string {
 	return helper.SetToSliceString(set)
 }
 
+// VaultEntityAliasesSet takes the structure returned by VaultPolicies and
+// returns a set of required entity aliases.
 func VaultEntityAliasesSet(blocks map[string]map[string]*Vault) []string {
 	set := make(map[string]struct{})
 
-	for _, group := range blocks {
-		for _, task := range group {
-			if task.EntityAlias != "" {
-				set[task.EntityAlias] = struct{}{}
+	for _, task := range blocks {
+		for _, vault := range task {
+			if vault != nil && vault.EntityAlias != "" {
+				set[vault.EntityAlias] = struct{}{}
 			}
 		}
 	}

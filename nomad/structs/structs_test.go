@@ -566,7 +566,7 @@ func TestJob_SystemJob_Validate(t *testing.T) {
 
 }
 
-func TestJob_VaultPolicies(t *testing.T) {
+func TestJob_Vault(t *testing.T) {
 	ci.Parallel(t)
 
 	j0 := &Job{}
@@ -588,6 +588,7 @@ func TestJob_VaultPolicies(t *testing.T) {
 		Policies: []string{
 			"p5",
 		},
+		EntityAlias: "alias1",
 	}
 	j1 := &Job{
 		TaskGroups: []*TaskGroup{
@@ -5505,6 +5506,15 @@ func TestVault_Copy(t *testing.T) {
 	vc.EntityAlias = "alias2"
 
 	require.NotEqual(t, v, vc)
+}
+
+func TestVault_Canonicalize(t *testing.T) {
+	v := &Vault{
+		ChangeSignal: "sighup",
+	}
+	v.Canonicalize()
+	require.Equal(t, "SIGHUP", v.ChangeSignal)
+	require.Equal(t, VaultChangeModeRestart, v.ChangeMode)
 }
 
 func TestParameterizedJobConfig_Validate(t *testing.T) {

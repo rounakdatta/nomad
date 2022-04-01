@@ -125,7 +125,7 @@ func (jobImpliedConstraints) Name() string {
 }
 
 func (jobImpliedConstraints) Mutate(j *structs.Job) (*structs.Job, []error, error) {
-	// Get the required Vault Policies
+	// Get the Vault blocks in the job
 	vaultBlocks := j.Vault()
 
 	// Get the required signals
@@ -164,7 +164,7 @@ func (jobImpliedConstraints) Mutate(j *structs.Job) (*structs.Job, []error, erro
 	for _, tg := range j.TaskGroups {
 		tgSignals, ok := signals[tg.Name]
 		if !ok {
-			// Not requesting Vault
+			// Not requesting signal
 			continue
 		}
 
