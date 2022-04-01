@@ -1267,8 +1267,11 @@ func (ar *allocRunner) Reconnect(update *structs.Allocation) (err error) {
 	// Build the client allocation
 	alloc := ar.clientAlloc(states)
 
-	// Don't destroy until after we've appended the reconnect event.
+	// Don't shut down until after we've appended the reconnect event.
 	if update.DesiredStatus != structs.AllocDesiredStatusRun {
+		if update.DesiredTransition.ShouldIgnoreShutdownDelay() {
+			ar.shutdownDelayCancelFn()
+		}
 		ar.Shutdown()
 		return
 	}
