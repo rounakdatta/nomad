@@ -101,6 +101,21 @@ func (v *TestVaultClient) SetLookupTokenAllowedPolicies(token string, policies [
 	v.SetLookupTokenSecret(token, s)
 }
 
+func (v *TestVaultClient) SetLookupTokenRoleError(token string, err error) {
+	if v.LookupTokenRoleErrors == nil {
+		v.LookupTokenRoleErrors = make(map[string]error)
+	}
+
+	v.LookupTokenRoleErrors[token] = err
+}
+
+func (v *TestVaultClient) SetLookupTokenRoleSecret(role string, secret *vapi.Secret) {
+	if v.LookupTokenRoleSecret == nil {
+		v.LookupTokenRoleSecret = make(map[string]*vapi.Secret)
+	}
+	v.LookupTokenRoleSecret[role] = secret
+}
+
 func (v *TestVaultClient) CreateToken(ctx context.Context, a *structs.Allocation, task string) (*vapi.Secret, error) {
 	var secret *vapi.Secret
 	var err error

@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/testutil"
 	"github.com/hashicorp/raft"
+	vapi "github.com/hashicorp/vault/api"
 	"github.com/kr/pretty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1545,7 +1546,7 @@ func TestJobEndpoint_Register_Vault_NoToken(t *testing.T) {
 	// Fetch the response
 	var resp structs.JobRegisterResponse
 	err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp)
-	if err == nil || !strings.Contains(err.Error(), "missing Vault Token") {
+	if err == nil || !strings.Contains(err.Error(), "missing Vault token") {
 		t.Fatalf("expected Vault not enabled error: %v", err)
 	}
 }
@@ -1746,6 +1747,199 @@ func TestJobEndpoint_Register_Vault_MultiNamespaces(t *testing.T) {
 
 func TestJobEndpoint_Register_Vault_EntityAlias(t *testing.T) {
 	ci.Parallel(t)
+
+	jobNoVault := mock.Job()
+	jobNoVault.TaskGroups[0].Tasks[0].Vault = nil
+
+	jobNoAlias := mock.Job()
+	jobNoVault.TaskGroups[0].Tasks[0].Vault = &structs.Vault{
+		Policies: []string{"nomad"},
+	}
+
+	jobWithAlias := mock.Job()
+	jobWithAlias.TaskGroups[0].Tasks[0].Vault = &structs.Vault{
+		Policies:    []string{"nomad"},
+		EntityAlias: "nomad",
+	}
+
+	jobWithTwoAliases := jobWithAlias.Copy()
+	jobWithTwoAliases.TaskGroups[0].Tasks = append(
+		jobWithTwoAliases.TaskGroups[0].Tasks,
+		jobWithTwoAliases.TaskGroups[0].Tasks[0].Copy())
+	jobWithTwoAliases.TaskGroups[0].Tasks[1].Name = "web2"
+	jobWithTwoAliases.TaskGroups[0].Tasks[1].Vault.EntityAlias = "nomad2"
+
+	testCases := []struct {
+		name          string
+		token         string
+		job           *structs.Job
+		serverConfig  func(*Config)
+		expectedError string
+	}{
+		{
+			name:  "no vault",
+			token: "not-allowed",
+			job:   jobNoVault,
+		},
+		{
+			name:  "no entity alias",
+			token: "not-allowed",
+			job:   jobNoAlias,
+		},
+		{
+			name:  "allowed",
+			token: "allowed",
+			job:   jobWithAlias,
+			serverConfig: func(c *Config) {
+				c.VaultConfig.Token = "allowed"
+				c.VaultConfig.Role = "nomad"
+			},
+		},
+		{
+			name:  "allowed with multiple of same aliases",
+			token: "allowed",
+			job: func() *structs.Job {
+				j := jobWithTwoAliases.Copy()
+				j.TaskGroups[0].Tasks[1].Vault.EntityAlias = "nomad"
+				return j
+			}(),
+			serverConfig: func(c *Config) {
+				c.VaultConfig.Token = "allowed"
+				c.VaultConfig.Role = "nomad"
+			},
+		},
+		{
+			name:          "token without role",
+			token:         "no-role",
+			job:           jobWithAlias,
+			expectedError: "jobs with Vault entity aliases require the Vault token to have a role",
+		},
+		{
+			name:          "token without access to alias",
+			token:         "not-allowed",
+			job:           jobWithAlias,
+			expectedError: "role doesn't allow access to the following entity aliases: nomad",
+		},
+		{
+			name:          "token without access to any aliases",
+			token:         "not-allowed",
+			job:           jobWithTwoAliases,
+			expectedError: "role doesn't allow access to the following entity aliases: nomad, nomad2",
+		},
+		{
+			name:          "token without access to one of the aliases",
+			token:         "allowed",
+			job:           jobWithTwoAliases,
+			expectedError: "role doesn't allow access to the following entity aliases: nomad2",
+		},
+		{
+			name:  "root taken can't submit without role",
+			token: "root",
+			job:   jobWithAlias,
+			serverConfig: func(c *Config) {
+				c.VaultConfig.Token = "allowed"
+				c.VaultConfig.Role = "nomad"
+			},
+			expectedError: "jobs with Vault entity aliases require the Vault token to have a role",
+		},
+		{
+			name:  "server without role",
+			token: "allowed",
+			job:   jobWithAlias,
+			serverConfig: func(c *Config) {
+				c.VaultConfig.Token = "root"
+			},
+			expectedError: "jobs with Vault entity aliases require the Nomad server to have a Vault role",
+		},
+		{
+			name:  "server without alias",
+			token: "allowed",
+			job:   jobWithAlias,
+			serverConfig: func(c *Config) {
+				c.VaultConfig.Token = "allowed"
+				c.VaultConfig.Role = "not-nomad"
+			},
+			expectedError: "failed to validate entity alias against Nomad server configuration",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, cleanup := TestServer(t, tc.serverConfig)
+			defer cleanup()
+			codec := rpcClient(t, s)
+			testutil.WaitForLeader(t, s.RPC)
+
+			// Enable vault
+			s.config.VaultConfig.Enabled = helper.BoolToPtr(true)
+			s.config.VaultConfig.AllowUnauthenticated = helper.BoolToPtr(false)
+
+			// Replace the Vault Client on the server
+			tvc := &TestVaultClient{}
+			s.vault = tvc
+
+			// Load Vault server roles
+			tvc.SetLookupTokenRoleSecret("nomad", &vapi.Secret{
+				Data: map[string]interface{}{
+					"allowed_entity_aliases": []string{"nomad"},
+				},
+			})
+			tvc.SetLookupTokenRoleSecret("not-nomad", &vapi.Secret{
+				Data: map[string]interface{}{
+					"allowed_entity_aliases": []string{"not-nomad"},
+				},
+			})
+			tvc.SetLookupTokenRoleSecret("no-alias", &vapi.Secret{
+				Data: map[string]interface{}{
+					"allowed_entity_aliases": []string{},
+				},
+			})
+
+			// Load Vault server tokens
+			tvc.SetLookupTokenSecret("root", &vapi.Secret{
+				Data: map[string]interface{}{
+					"policies": []string{"root"},
+				},
+			})
+			tvc.SetLookupTokenSecret("allowed", &vapi.Secret{
+				Data: map[string]interface{}{
+					"policies": []string{"nomad"},
+					"role":     "nomad",
+				},
+			})
+			tvc.SetLookupTokenSecret("not-allowed", &vapi.Secret{
+				Data: map[string]interface{}{
+					"policies": []string{"nomad"},
+					"role":     "not-nomad",
+				},
+			})
+			tvc.SetLookupTokenSecret("no-role", &vapi.Secret{
+				Data: map[string]interface{}{
+					"policies": []string{"nomad"},
+					"role":     "",
+				},
+			})
+
+			job := tc.job.Copy()
+			job.VaultToken = tc.token
+
+			req := &structs.JobRegisterRequest{
+				Job: job,
+				WriteRequest: structs.WriteRequest{
+					Region:    "global",
+					Namespace: job.Namespace,
+				},
+			}
+
+			var resp structs.JobRegisterResponse
+			err := msgpackrpc.CallWithCodec(codec, "Job.Register", req, &resp)
+			if tc.expectedError != "" {
+				require.Contains(t, err.Error(), tc.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 // TestJobEndpoint_Register_SemverConstraint asserts that semver ordering is
@@ -2609,7 +2803,7 @@ func TestJobEndpoint_Revert_Vault_NoToken(t *testing.T) {
 
 	// Fetch the response
 	err = msgpackrpc.CallWithCodec(codec, "Job.Revert", revertReq, &resp)
-	if err == nil || !strings.Contains(err.Error(), "missing Vault Token") {
+	if err == nil || !strings.Contains(err.Error(), "missing Vault token") {
 		t.Fatalf("expected Vault not enabled error: %v", err)
 	}
 }

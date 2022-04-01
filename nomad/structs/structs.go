@@ -8961,6 +8961,10 @@ func (v *Vault) Canonicalize() {
 	if v.ChangeSignal != "" {
 		v.ChangeSignal = strings.ToUpper(v.ChangeSignal)
 	}
+
+	if v.ChangeMode == "" {
+		v.ChangeMode = VaultChangeModeRestart
+	}
 }
 
 // Validate returns if the Vault block is valid.
