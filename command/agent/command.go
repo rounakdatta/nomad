@@ -26,6 +26,7 @@ import (
 	gsyslog "github.com/hashicorp/go-syslog"
 	"github.com/hashicorp/logutils"
 	"github.com/hashicorp/nomad/helper"
+	"github.com/hashicorp/nomad/helper/bufconndialer"
 	flaghelper "github.com/hashicorp/nomad/helper/flags"
 	gatedwriter "github.com/hashicorp/nomad/helper/gated-writer"
 	"github.com/hashicorp/nomad/helper/logging"
@@ -517,6 +518,11 @@ func SetupLoggers(ui cli.Ui, config *Config) (*logutils.LevelFilter, *gatedwrite
 // setupAgent is used to start the agent and various interfaces
 func (c *Command) setupAgent(config *Config, logger hclog.InterceptLogger, logOutput io.Writer, inmem *metrics.InmemSink) error {
 	c.Ui.Output("Starting Nomad agent...")
+
+	//TODO(schmichael) find a proper spot for this
+	//TODO only needed when client agents are enabled
+	config.builtinListener, config.builtinDialer = bufconndialer.New()
+
 	agent, err := NewAgent(config, logger, logOutput, inmem)
 	if err != nil {
 		// log the error as well, so it appears at the end

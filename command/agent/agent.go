@@ -519,6 +519,9 @@ func (a *Agent) finalizeClientConfig(c *clientconfig.Config) error {
 		}
 	}
 
+	//TODO put in a better place
+	c.HTTPDialer = a.config.builtinDialer
+
 	// Setup the plugin loaders
 	c.PluginLoader = a.pluginLoader
 	c.PluginSingletonLoader = a.pluginSingletonLoader

@@ -21,6 +21,7 @@ import (
 	"github.com/hashicorp/go-sockaddr/template"
 	client "github.com/hashicorp/nomad/client/config"
 	"github.com/hashicorp/nomad/helper"
+	"github.com/hashicorp/nomad/helper/bufconndialer"
 	"github.com/hashicorp/nomad/nomad"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/nomad/structs/config"
@@ -87,6 +88,11 @@ type Config struct {
 
 	// normalizedAddr is set to the Address+Port by normalizeAddrs()
 	normalizedAddrs *NormalizedAddrs
+
+	// builtinDialer dials the builtinListener. Used for connecting
+	// consul-template to the HTTP API in process.
+	builtinDialer   *bufconndialer.BufConnWrapper
+	builtinListener net.Listener
 
 	// AdvertiseAddrs is used to control the addresses we advertise.
 	AdvertiseAddrs *AdvertiseAddrs `hcl:"advertise"`

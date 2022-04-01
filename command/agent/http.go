@@ -116,9 +116,6 @@ func NewHTTPServers(agent *Agent, config *Config) ([]*HTTPServer, error) {
 
 	// Start the listener
 	for _, addr := range config.normalizedAddrs.HTTP {
-		// Create the mux
-		mux := http.NewServeMux()
-
 		lnAddr, err := net.ResolveTCPAddr("tcp", addr)
 		if err != nil {
 			serverInitializationErrors = multierror.Append(serverInitializationErrors, err)
@@ -143,7 +140,7 @@ func NewHTTPServers(agent *Agent, config *Config) ([]*HTTPServer, error) {
 		// Create the server
 		srv := &HTTPServer{
 			agent:      agent,
-			mux:        mux,
+			mux:        http.NewServeMux(),
 			listener:   ln,
 			listenerCh: make(chan struct{}),
 			logger:     agent.httpLogger,
@@ -155,7 +152,7 @@ func NewHTTPServers(agent *Agent, config *Config) ([]*HTTPServer, error) {
 		// Create HTTP server with timeouts
 		httpServer := http.Server{
 			Addr:      srv.Addr,
-			Handler:   handlers.CompressHandler(mux),
+			Handler:   handlers.CompressHandler(srv.mux),
 			ConnState: makeConnState(config.TLSConfig.EnableHTTP, handshakeTimeout, maxConns),
 			ErrorLog:  newHTTPServerLogger(srv.logger),
 		}
@@ -163,6 +160,38 @@ func NewHTTPServers(agent *Agent, config *Config) ([]*HTTPServer, error) {
 		go func() {
 			defer close(srv.listenerCh)
 			httpServer.Serve(ln)
+		}()
+
+		srvs = append(srvs, srv)
+	}
+
+	// Add a builtin HTTP server for consul-template
+	//TODO only needed when client agents are enabled
+	{
+		mux := http.NewServeMux()
+		srv := &HTTPServer{
+			agent:      agent,
+			mux:        mux,
+			listener:   config.builtinListener,
+			listenerCh: make(chan struct{}),
+			logger:     agent.httpLogger,
+			Addr:       "builtin",
+			wsUpgrader: wsUpgrader,
+		}
+
+		//TODO only register services and inject auth token (or inject
+		//auth token into template config?)
+		srv.registerHandlers(config.EnableDebug)
+
+		httpServer := http.Server{
+			Addr:     srv.Addr,
+			Handler:  mux,
+			ErrorLog: newHTTPServerLogger(srv.logger),
+		}
+
+		go func() {
+			defer close(srv.listenerCh)
+			httpServer.Serve(config.builtinListener)
 		}()
 
 		srvs = append(srvs, srv)
