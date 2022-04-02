@@ -777,9 +777,8 @@ func (ar *allocRunner) NetworkStatus() *structs.AllocNetworkStatus {
 	return ar.state.NetworkStatus.Copy()
 }
 
-// setIndexes is a helper for forcing a set of server side indexes
-// on the alloc runner. This is used during reconnect when the task
-// has been marked unknown by the server.
+// setIndexes is a helper for forcing alloc state on the alloc runner. This is
+// used during reconnect when the task has been marked unknown by the server.
 func (ar *allocRunner) setIndexes(update *structs.Allocation) {
 	ar.allocLock.Lock()
 	defer ar.allocLock.Unlock()
@@ -1246,15 +1245,13 @@ func (ar *allocRunner) Signal(taskName, signal string) error {
 
 // Reconnect logs a reconnect event for each task in the allocation and syncs the current alloc state with the server.
 func (ar *allocRunner) Reconnect(update *structs.Allocation) (err error) {
-	ar.logger.Trace("reconnecting alloc", "alloc_id", update.ID, "alloc_modify_index", update.AllocModifyIndex)
-
 	event := structs.NewTaskEvent(structs.TaskClientReconnected)
 	event.Time = time.Now().UnixNano()
 	for _, tr := range ar.tasks {
 		tr.AppendEvent(event)
 	}
 
-	// Update the client alloc with the server client side indexes.
+	// Update the client alloc with the server side indexes.
 	ar.setIndexes(update)
 
 	// Calculate alloc state to get the final state with the new events.
@@ -1266,15 +1263,20 @@ func (ar *allocRunner) Reconnect(update *structs.Allocation) (err error) {
 
 	// Build the client allocation
 	alloc := ar.clientAlloc(states)
+	// setIndexes works for setting the state in memory for the runner, but
+	// does not get set by clientAlloc. We have to set that before updating
+	// local client state.
+	//alloc.AllocModifyIndex = update.AllocModifyIndex
+	//alloc.ModifyIndex = update.ModifyIndex
+	//alloc.ModifyTime = update.ModifyTime
+	//alloc.DesiredStatus = update.DesiredStatus
+	//alloc.DesiredTransition = update.DesiredTransition
+	//alloc.DesiredDescription = update.DesiredDescription
 
-	// Don't shut down until after we've appended the reconnect event.
-	if update.DesiredStatus != structs.AllocDesiredStatusRun {
-		if update.DesiredTransition.ShouldIgnoreShutdownDelay() {
-			ar.shutdownDelayCancelFn()
-		}
-		ar.Shutdown()
-		return
-	}
+	//if alloc.ClientStatus == structs.AllocClientStatusRunning && update.DesiredStatus != structs.AllocDesiredStatusRun {
+	//	ar.shutdownDelayCancelFn()
+	//	ar.Shutdown()
+	//}
 
 	// Update the client state store.
 	err = ar.stateUpdater.PutAllocation(alloc)

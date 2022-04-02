@@ -1130,6 +1130,16 @@ func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.Gene
 	var evals []*structs.Evaluation
 
 	for _, allocToUpdate := range args.Alloc {
+		n.logger.Trace("client alloc",
+			"alloc_id", allocToUpdate.ID,
+			"alloc_modify_index", allocToUpdate.AllocModifyIndex,
+			"client_status", allocToUpdate.ClientStatus,
+			"desired_status", allocToUpdate.DesiredStatus,
+			"should_migrate", allocToUpdate.DesiredTransition.ShouldMigrate(),
+			"should_reschedule", allocToUpdate.DesiredTransition.ShouldReschedule(),
+			"ignore_shutdown_delay", allocToUpdate.DesiredTransition.ShouldIgnoreShutdownDelay(),
+			"force_reschedule", allocToUpdate.DesiredTransition.ShouldForceReschedule())
+
 		evalTriggerBy := ""
 		allocToUpdate.ModifyTime = now.UTC().UnixNano()
 
@@ -1141,6 +1151,16 @@ func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.Gene
 		if !allocToUpdate.TerminalStatus() && alloc.ClientStatus != structs.AllocClientStatusUnknown {
 			continue
 		}
+
+		n.logger.Trace("server alloc",
+			"alloc_id", alloc.ID,
+			"alloc_modify_index", alloc.AllocModifyIndex,
+			"client_status", alloc.ClientStatus,
+			"desired_status", alloc.DesiredStatus,
+			"should_migrate", alloc.DesiredTransition.ShouldMigrate(),
+			"should_reschedule", alloc.DesiredTransition.ShouldReschedule(),
+			"ignore_shutdown_delay", alloc.DesiredTransition.ShouldIgnoreShutdownDelay(),
+			"force_reschedule", alloc.DesiredTransition.ShouldForceReschedule())
 
 		// if the job has been purged, this will always return error
 		var job *structs.Job
@@ -1204,6 +1224,8 @@ func (n *Node) UpdateAlloc(args *structs.AllocUpdateRequest, reply *structs.Gene
 			jobType = job.Type
 			jobPriority = job.Priority
 		}
+
+		n.logger.Trace("UpdateAlloc", "eval_trigger_by", evalTriggerBy)
 
 		eval = &structs.Evaluation{
 			ID:          uuid.Generate(),
@@ -1286,6 +1308,17 @@ func (n *Node) batchUpdate(future *structs.BatchFuture, updates []*structs.Alloc
 		n.logger.Debug("adding evaluations for rescheduling failed allocations", "num_evals", len(trimmedEvals))
 	}
 	// Prepare the batch update
+	for _, alloc := range updates {
+		n.logger.Trace("batch_updates",
+			"alloc_id", alloc.ID,
+			"alloc_modify_index", alloc.AllocModifyIndex,
+			"client_status", alloc.ClientStatus,
+			"desired_status", alloc.DesiredStatus,
+			"should_migrate", alloc.DesiredTransition.ShouldMigrate(),
+			"should_reschedule", alloc.DesiredTransition.ShouldReschedule(),
+			"ignore_shutdown_delay", alloc.DesiredTransition.ShouldIgnoreShutdownDelay(),
+			"force_reschedule", alloc.DesiredTransition.ShouldForceReschedule())
+	}
 	batch := &structs.AllocUpdateRequest{
 		Alloc:        updates,
 		Evals:        trimmedEvals,

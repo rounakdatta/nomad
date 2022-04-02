@@ -244,7 +244,7 @@ func (a allocSet) filterByTainted(taintedNodes map[string]*structs.Node, support
 		}
 
 		// Non-terminal allocs that should migrate should always migrate
-		if alloc.DesiredTransition.ShouldMigrate() {
+		if alloc.DesiredTransition.ShouldMigrate() && !reconnected {
 			migrate[alloc.ID] = alloc
 			continue
 		}

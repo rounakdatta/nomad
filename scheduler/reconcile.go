@@ -930,7 +930,7 @@ func (a *allocReconciler) computeStop(group *structs.TaskGroup, nameIndex *alloc
 		// Even if there appears to be nothing to do here, we have to make sure
 		// failed reconnects get marked for stop.
 		failReconnects := reconnecting.filterByFailedReconnect()
-		a.markStop(failReconnects, structs.AllocClientStatusFailed, allocRescheduled)
+		a.markStop(failReconnects, structs.AllocClientStatusFailed, allocRescheduled+"fail reconnects")
 		return stop.union(failReconnects)
 	}
 
@@ -947,7 +947,7 @@ func (a *allocReconciler) computeStop(group *structs.TaskGroup, nameIndex *alloc
 				stop[id] = alloc
 				a.result.stop = append(a.result.stop, allocStopResult{
 					alloc:             alloc,
-					statusDescription: allocNotNeeded,
+					statusDescription: allocNotNeeded + " - canarying - " + a.evalID,
 				})
 				delete(untainted, id)
 
@@ -969,7 +969,7 @@ func (a *allocReconciler) computeStop(group *structs.TaskGroup, nameIndex *alloc
 			}
 			a.result.stop = append(a.result.stop, allocStopResult{
 				alloc:             alloc,
-				statusDescription: allocNotNeeded,
+				statusDescription: allocNotNeeded + " - migrate - " + a.evalID,
 			})
 			delete(migrate, id)
 			stop[id] = alloc
@@ -997,7 +997,7 @@ func (a *allocReconciler) computeStop(group *structs.TaskGroup, nameIndex *alloc
 			stop[id] = alloc
 			a.result.stop = append(a.result.stop, allocStopResult{
 				alloc:             alloc,
-				statusDescription: allocNotNeeded,
+				statusDescription: allocNotNeeded + " - remove names - " + a.evalID,
 			})
 			delete(untainted, id)
 
@@ -1014,7 +1014,7 @@ func (a *allocReconciler) computeStop(group *structs.TaskGroup, nameIndex *alloc
 		stop[id] = alloc
 		a.result.stop = append(a.result.stop, allocStopResult{
 			alloc:             alloc,
-			statusDescription: allocNotNeeded,
+			statusDescription: allocNotNeeded + " - duplicate names - " + a.evalID,
 		})
 		delete(untainted, id)
 
@@ -1047,7 +1047,7 @@ func (a *allocReconciler) computeStopByReconnecting(untainted, reconnecting, sto
 			stop[reconnectingAlloc.ID] = reconnectingAlloc
 			a.result.stop = append(a.result.stop, allocStopResult{
 				alloc:             reconnectingAlloc,
-				statusDescription: allocNotNeeded,
+				statusDescription: allocNotNeeded + " - stop by reconnect server stop - " + a.evalID,
 			})
 			delete(reconnecting, reconnectingAlloc.ID)
 
@@ -1066,7 +1066,7 @@ func (a *allocReconciler) computeStopByReconnecting(untainted, reconnecting, sto
 			stop[reconnectingAlloc.ID] = reconnectingAlloc
 			a.result.stop = append(a.result.stop, allocStopResult{
 				alloc:             reconnectingAlloc,
-				statusDescription: allocRescheduled,
+				statusDescription: allocRescheduled + " - stop reconnecting failed on client - " + a.evalID,
 			})
 			delete(reconnecting, reconnectingAlloc.ID)
 
@@ -1102,14 +1102,14 @@ func (a *allocReconciler) computeStopByReconnecting(untainted, reconnecting, sto
 				continue
 			}
 
-			statusDescription := allocNotNeeded
+			statusDescription := allocNotNeeded + " - stop by reconnect untainted - " + a.evalID
 			if untaintedAlloc.Job.Version > reconnectingAlloc.Job.Version ||
 				untaintedAlloc.Job.CreateIndex > reconnectingAlloc.Job.CreateIndex ||
 				untaintedMaxScoreMeta.NormScore > reconnectingMaxScoreMeta.NormScore {
 				stopAlloc = reconnectingAlloc
 				deleteSet = reconnecting
 			} else {
-				statusDescription = allocReconnected
+				statusDescription = allocReconnected + "stop by reconnect reconnecting - " + a.evalID
 			}
 
 			stop[stopAlloc.ID] = stopAlloc
